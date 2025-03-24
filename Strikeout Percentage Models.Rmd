@@ -1,0 +1,729 @@
+---
+title: "DSE 6620 MLB Project"
+author: "James Keegan"
+date: '2025-02-16'
+output: html_document
+---
+
+```{R}
+library(tidyverse)
+library(lubridate)
+library(caret)
+library(stats)
+library(ggplot2)
+library(corrplot)
+library(here)
+library(ggthemes)
+
+```
+
+```{R}
+# Load Data
+mlb_data = read.csv("C:\\Users\\student\\Documents\\DSE 6620\\Module 4\\DSE 6620 Baseball - k.csv")
+
+mlb_data_clean = mlb_data %>%
+  filter(Season == c(2021, 2022, 2023))
+head(mlb_data_clean)
+
+```
+
+# Examination of Data
+
+```{R}
+# Average K% per season
+season_K = mlb_data_clean %>%
+  group_by(Season) %>%
+  summarise(Avg.K = mean(K.))
+print(season_K)
+
+```
+
+```{R}
+# Average K% per team
+team_K = mlb_data_clean %>%
+  group_by(Team) %>%
+  summarise(Avg.K = mean(K.)) %>%
+  arrange(desc(Avg.K))
+print(team_K)
+
+```
+
+```{R}
+# Scatter Plot of K% and Total Batters Faced
+ggplot(mlb_data_clean, aes(x=TBF, y=K.)) + geom_point()
+
+```
+
+```{R}
+# Line Plot of Average K% by Age
+age_k = mlb_data_clean %>%
+  group_by(Age) %>%
+  summarise(Avg.K = mean(K.))
+
+ggplot(age_k, aes(x=Age, y=Avg.K)) + geom_line()
+
+```
+
+```{R}
+# Average Total Batters Face and K%
+player_K = mlb_data_clean %>%
+  group_by(Name) %>%
+  summarise(Avg.TBF = mean(TBF), Avg.K = mean(K.)) %>%
+  arrange(desc(Avg.K))
+print(player_K)
+
+```
+
+```{R}
+# Scatter Plot of Average Total Batters Face and K%
+ggplot(player_K, aes(x=Avg.TBF, y=Avg.K)) + geom_point()
+
+```
+
+# Hierarchal Clustering 1
+
+```{R}
+# Train the data for Hierarchal Clustering
+train_data <- mlb_data_clean %>% filter(Season == 2021)
+validation <- mlb_data_clean %>% filter(Season == c(2022, 2023))
+
+train.data <- as.matrix(train_data[, c("Age", "TBF")])
+data.scaled <- scale(train.data)
+
+data.dist <- dist(data.scaled)
+data.hclust <- hclust(d = data.dist, method = "complete")
+
+plot(data.hclust)
+abline(h = 4, lty = 2)
+
+```
+
+```{R}
+# Cluster Creation
+data.hclust.clusters <- cutree(data.hclust, k = 6)
+data_clust <- data.frame(data.hclust.clusters = as.character(data.hclust.clusters))
+
+```
+
+```{R}
+# Cluster Summary
+cluster_summary <- train_data %>%
+  bind_cols(data_clust) %>%
+  group_by(data.hclust.clusters) %>%
+  summarise(
+    Age = mean(Age),
+    TBF = mean(TBF),
+    est.K. = mean (K.),
+    count = n()
+  )
+print(cluster_summary)
+
+```
+
+```{R}
+# Combine Clusters and Re-print the Summary
+pitcher_data_updated <- train_data %>%
+  bind_cols(data_clust) %>%
+  mutate(data.hclust.clusters = case_when(
+    data.hclust.clusters == "5" ~ "1",
+    data.hclust.clusters == "4" ~ "2",
+    data.hclust.clusters == "6" ~ "3",
+    TRUE ~ data.hclust.clusters
+  ))
+
+cluster_summary_updated <- pitcher_data_updated %>%
+  group_by(data.hclust.clusters) %>%
+  summarise(
+    Age = mean(Age),
+    TBF = mean(TBF),
+    est.K. = mean (K.),
+    count = n()
+  )
+print(cluster_summary_updated)
+
+```
+
+```{R}
+# Creating a new, descriptive column for each cluster and adding it to the historical data
+lookup <- tibble(
+  pitcher_index = as.character(1:3),
+  picther_age = c("Low 30s", "Mid to Late 30s", "Younger than 30")
+)
+
+picther_data_final <- pitcher_data_updated %>%
+  inner_join(lookup, by = c("data.hclust.clusters" = "pitcher_index")) %>%
+  mutate(picther_age = as.factor(picther_age))
+head(picther_data_final)
+
+```
+
+```{R}
+ggplot(picther_data_final, aes(x = K., y = TBF, color = picther_age)) + geom_point(size = 1, alpha = 0.5, position = "jitter")
+
+```
+
+# Adding Fangraphs Data and Examining
+
+```{R}
+# Upload the Fangraphs data
+fangraphs = read.csv("C:\\Users\\student\\Documents\\DSE 6620\\Module 4\\FanGraphs Data - Sheet1.csv")
+head(fangraphs)
+
+```
+
+```{R}
+# Cleaning and Joining the data
+mlb_2023 = mlb_data_clean %>%
+  filter(Season == 2023)
+
+joint_data = left_join(mlb_2023, fangraphs, by = "Name")
+
+joint_data = joint_data %>%
+  select(-Team.y) 
+
+colnames(joint_data)[colnames(joint_data) == "Team.x"] = "Team"
+
+head(joint_data)
+
+```
+
+```{R}
+# Creating Fastball data
+fastball_data = joint_data %>%
+  filter(!is.na(vFA))
+
+avg_fastball_age = fastball_data %>%
+  group_by(Age) %>%
+  summarise(avg_fastball = mean(vFA))
+
+# Average Fastball Velocity and Age Line plot
+ggplot(avg_fastball_age, aes(x=Age, y=avg_fastball)) + geom_line()
+
+```
+
+```{R}
+# Fastball Velocity and K% Scatter Plot
+ggplot(fastball_data, aes(x=vFA, y=K.)) + geom_point()
+
+```
+
+# Hierarchal Clustering 2
+
+```{R}
+# Train the data for Hierarchal Clustering
+train_data_2 <- fastball_data %>% filter(IP < 100)
+validation_2 <- fastball_data %>% filter(IP >= 100)
+
+train.data_2 <- as.matrix(train_data_2[, c("Age", "vFA")])
+data.scaled_2 <- scale(train.data_2)
+
+data.dist_2 <- dist(data.scaled_2)
+data.hclust_2 <- hclust(d = data.dist_2, method = "complete")
+
+plot(data.hclust_2)
+abline(h = 4, lty = 2)
+
+```
+
+```{R}
+# Cluster Creation
+data.hclust.clusters_2 <- cutree(data.hclust_2, k = 6)
+data_clust_2 <- data.frame(data.hclust.clusters_2 = as.character(data.hclust.clusters_2))
+
+```
+
+```{R}
+# Cluster Summary
+cluster_summary_2 <- train_data_2 %>%
+  bind_cols(data_clust_2) %>%
+  group_by(data.hclust.clusters_2) %>%
+  summarise(
+    vFA = mean(vFA),
+    Age = mean(Age),
+    est.K. = mean(K.),
+    count = n()
+  ) 
+print(cluster_summary_2)
+
+```
+
+```{R}
+# Combine Clusters and Re-print the Summary
+pitcher_data_updated_2 <- train_data_2 %>%
+  bind_cols(data_clust_2) %>%
+  mutate(data.hclust.clusters_2 = case_when(
+    data.hclust.clusters_2 == "2" ~ "1",
+    data.hclust.clusters_2 == "4" ~ "3",
+    data.hclust.clusters_2 == "6" ~ "5",
+    TRUE ~ data.hclust.clusters_2
+  ))
+
+cluster_summary_updated_2 <- pitcher_data_updated_2 %>%
+  group_by(data.hclust.clusters_2) %>%
+  summarise(
+    vFA = mean(vFA),
+    Age = mean(Age),
+    est.K. = mean (K.),
+    count = n()
+  )
+print(cluster_summary_updated_2)
+
+```
+
+```{R}
+# Creating a new, descriptive column for each cluster and adding it to the historical data
+lookup <- tibble(
+  pitcher_index = as.character(1:5),
+  picther_stats = c("Younger Picther", "" , "Average Aged Pitcher", "", "Older Pitcher")
+)
+
+picther_data_final_2 <- pitcher_data_updated_2 %>%
+  inner_join(lookup, by = c("data.hclust.clusters_2" = "pitcher_index")) %>%
+  mutate(picther_stats = as.factor(picther_stats))
+print(picther_data_final_2)
+
+```
+
+```{R}
+ggplot(picther_data_final_2, aes(x = K., y = vFA, color = picther_stats)) + geom_point(size = 1, alpha = 0.5, position = "jitter")
+
+```
+
+# Hierarchal Clustering 3
+
+```{R}
+# Train the data for Hierarchal Clustering
+slider_data = joint_data %>%
+  filter(!is.na(vSL))
+
+train_data_3 <- slider_data %>% filter(IP < 100)
+validation_3 <- slider_data %>% filter(IP >= 100)
+
+train.data_3 <- as.matrix(train_data_3[, c("Age","vSL")])
+data.scaled_3 <- scale(train.data_3)
+
+data.dist_3 <- dist(data.scaled_3)
+data.hclust_3 <- hclust(d = data.dist_3, method = "complete")
+
+plot(data.hclust_3)
+abline(h = 4, lty = 2)
+
+```
+
+```{R}
+# Cluster Creation
+data.hclust.clusters_3 <- cutree(data.hclust_3, k = 6)
+data_clust_3 <- data.frame(data.hclust.clusters_3 = as.character(data.hclust.clusters_3))
+
+```
+
+```{R}
+# Cluster Summary
+cluster_summary_3 <- train_data_3 %>%
+  bind_cols(data_clust_3) %>%
+  group_by(data.hclust.clusters_3) %>%
+  summarise(
+    vSL = mean(vSL),
+    Age = mean(Age),
+    est.K. = mean(K.),
+    count = n()
+  )
+print(cluster_summary_3)
+
+```
+
+```{R}
+# Combine Clusters and Re-print the Summary
+pitcher_data_updated_3 <- train_data_3 %>%
+  bind_cols(data_clust_3) %>%
+  mutate(data.hclust.clusters_3 = case_when(
+    data.hclust.clusters_3 == "3" ~ "1",
+    data.hclust.clusters_3 == "5" ~ "2",
+    TRUE ~ data.hclust.clusters_3
+  ))
+
+cluster_summary_updated_3 <- pitcher_data_updated_3 %>%
+  group_by(data.hclust.clusters_3) %>%
+  summarise(
+    vSL = mean(vSL),
+    Age = mean(Age),
+    est.K. = mean (K.),
+    count = n()
+  )
+print(cluster_summary_updated_3)
+
+```
+
+```{R}
+# Creating a new, descriptive column for each cluster and adding it to the historical data
+lookup <- tibble(
+  pitcher_index = as.character(1:6),
+  picther_stats = c("Average Age & High Velocity", "Younger & High Velocity", "", "Older & Average Velocity", "", "Average Age & Low Velocity")
+)
+
+picther_data_final_3 <- pitcher_data_updated_3 %>%
+  inner_join(lookup, by = c("data.hclust.clusters_3" = "pitcher_index")) %>%
+  mutate(picther_stats = as.factor(picther_stats))
+print(picther_data_final_3)
+
+```
+
+```{R}
+ggplot(picther_data_final_3, aes(x = K., y = vSL, color = picther_stats)) + geom_point(size = 1, alpha = 0.5, position = "jitter")
+
+```
+
+# Hierarchal Clustering 4
+
+```{R}
+# Train the data for Hierarchal Clustering
+curveball_data = joint_data %>%
+  filter(!is.na(vCU))
+
+train_data_4 <- curveball_data %>% filter(IP < 100)
+validation_4 <- curveball_data %>% filter(IP >= 100)
+
+train.data_4 <- as.matrix(train_data_4[, c("Age", "vCU")])
+data.scaled_4 <- scale(train.data_4)
+
+data.dist_4 <- dist(data.scaled_4)
+data.hclust_4 <- hclust(d = data.dist_4, method = "complete")
+
+plot(data.hclust_4)
+abline(h = 4, lty = 2)
+
+```
+
+```{R}
+# Cluster Creation
+data.hclust.clusters_4 <- cutree(data.hclust_4, k = 6)
+data_clust_4 <- data.frame(data.hclust.clusters_4 = as.character(data.hclust.clusters_4))
+
+```
+
+```{R}
+# Cluster Summary
+cluster_summary_4 <- train_data_4 %>%
+  bind_cols(data_clust_4) %>%
+  group_by(data.hclust.clusters_4) %>%
+  summarise(
+    vCU = mean(vCU),
+    Age = mean(Age),
+    est.K. = mean(K.),
+    count = n()
+  )
+print(cluster_summary_4)
+
+```
+
+```{R}
+# Combine Clusters and Re-print the Summary
+pitcher_data_updated_4 <- train_data_4 %>%
+  bind_cols(data_clust_4) %>%
+  mutate(data.hclust.clusters_4 = case_when(
+    data.hclust.clusters_4 == "6" ~ "1",
+    data.hclust.clusters_4 == "5" ~ "2",
+    TRUE ~ data.hclust.clusters_4
+  ))
+
+cluster_summary_updated_4 <- pitcher_data_updated_4 %>%
+  group_by(data.hclust.clusters_4) %>%
+  summarise(
+    vCU = mean(vCU),
+    Age = mean(Age),
+    est.K. = mean (K.),
+    count = n()
+  )
+print(cluster_summary_updated_4)
+
+```
+
+```{R}
+# Creating a new, descriptive column for each cluster and adding it to the historical data
+lookup <- tibble(
+  pitcher_index = as.character(1:4),
+  picther_stats = c("Young & High Velocity", "Older & High Velocity", "Young & Average Velocity", "Average Age & Low Velocity")
+)
+
+picther_data_final_4 <- pitcher_data_updated_4 %>%
+  inner_join(lookup, by = c("data.hclust.clusters_4" = "pitcher_index")) %>%
+  mutate(picther_stats = as.factor(picther_stats))
+print(picther_data_final_4)
+
+```
+
+```{R}
+ggplot(picther_data_final_4, aes(x = K., y = vCU, color = picther_stats)) + geom_point(size = 1, alpha = 0.5, position = "jitter")
+
+```
+
+# Model 1 (Cluster 1)
+
+```{R}
+# Creating Training and Test data
+train_index <- createDataPartition(picther_data_final$K., p = 0.8, list = FALSE)
+
+train_data = picther_data_final[train_index, ]
+test_data = picther_data_final[-train_index, ]
+
+y_train = train_data$K.
+y_test = test_data$K.
+
+```
+
+```{R}
+# Creating Model 1
+library(randomForest)
+random_forest_model = randomForest(K. ~ ., data = picther_data_final)
+print(random_forest_model)
+
+```
+
+```{R}
+# Viewing which variables are most important
+importance(random_forest_model)
+
+```
+
+```{R}
+# Testing the accuracy
+predictions <- predict(random_forest_model, test_data)
+
+mse <- mean((predictions - test_data$K.)^2)
+print(mse)
+
+```
+
+# Model 2 (Cluster 2)
+
+```{R}
+# Creating Training and Test data
+train_index_2 <- createDataPartition(picther_data_final_2$K., p = 0.8, list = FALSE)
+
+train_data_2 = picther_data_final_2[train_index_2, ]
+test_data_2 = picther_data_final_2[-train_index_2, ]
+
+y_train_2 = train_data_2$K.
+y_test_2 = test_data_2$K.
+
+```
+
+```{R}
+# Creating Model 2
+library(randomForest)
+random_forest_model_2 = randomForest(K. ~ MLBAMID + PlayerId + Name + Team + Age + Season + TBF + IP + vFA + picther_stats, data = picther_data_final_2)
+print(random_forest_model_2)
+
+```
+
+```{R}
+# Viewing which variables are most important
+importance(random_forest_model_2)
+
+```
+
+```{R}
+# Testing the accuracy
+predictions_2 <- predict(random_forest_model_2, test_data_2)
+
+mse_2 <- mean((predictions_2 - test_data_2$K.)^2)
+print(mse_2)
+
+```
+
+# Model 3 (Cluster 3)
+
+```{R}
+# Creating Training and Test data
+train_index_3 <- createDataPartition(picther_data_final_3$K., p = 0.8, list = FALSE)
+
+train_data_3 = picther_data_final_3[train_index_3, ]
+test_data_3 = picther_data_final_3[-train_index_3, ]
+
+y_train_3 = train_data_3$K.
+y_test_3 = test_data_3$K.
+
+```
+
+```{R}
+# Creating Model 3
+library(randomForest)
+random_forest_model_3 = randomForest(K. ~ MLBAMID + PlayerId + Name + Team + Age + Season + TBF + IP + vSL + picther_stats, data = picther_data_final_3)
+print(random_forest_model_3)
+
+```
+
+```{R}
+# Viewing which variables are most important
+importance(random_forest_model_3)
+
+```
+
+```{R}
+# Testing the accuracy
+predictions_3 <- predict(random_forest_model_3, test_data_3)
+
+mse_3 <- mean((predictions_3 - test_data_3$K.)^2)
+print(mse_3)
+
+```
+
+# Model 4 (Cluster 4)
+
+```{R}
+# Creating Training and Test data
+train_index_4 <- createDataPartition(picther_data_final_4$K., p = 0.8, list = FALSE)
+
+train_data_4 = picther_data_final_4[train_index_4, ]
+test_data_4 = picther_data_final_4[-train_index_4, ]
+
+y_train_4 = train_data_4$K.
+y_test_4 = test_data_4$K.
+
+```
+
+```{R}
+# Creating Model 4
+library(randomForest)
+random_forest_model_4 = randomForest(K. ~ MLBAMID + PlayerId + Name + Team + Age + Season + TBF + IP + vCU + picther_stats, data = picther_data_final_4)
+print(random_forest_model_4)
+
+```
+
+```{R}
+# Viewing which variables are most important
+importance(random_forest_model_4)
+
+```
+
+```{R}
+# Testing the accuracy
+predictions_4 <- predict(random_forest_model_4, test_data_4)
+
+mse_4 <- mean((predictions_4 - test_data_4$K.)^2)
+print(mse_4)
+
+```
+
+# Final Hierarchical Clustering
+
+```{R}
+# Train the data for Hierarchal Clustering
+fastball_curveball_data = joint_data %>%
+  filter(!is.na(vCU)) %>%
+  filter(!is.na(vFA))
+
+train_data_5 <- fastball_curveball_data %>% filter(IP < 100)
+validation_5 <- fastball_curveball_data %>% filter(IP >= 100)
+
+train.data_5 <- as.matrix(train_data_5[, c("vFA", "vCU")])
+data.scaled_5 <- scale(train.data_5)
+
+data.dist_5 <- dist(data.scaled_5)
+data.hclust_5 <- hclust(d = data.dist_5, method = "complete")
+
+plot(data.hclust_5)
+abline(h = 4, lty = 2)
+
+```
+
+```{R}
+# Cluster Creation
+data.hclust.clusters_5 <- cutree(data.hclust_5, k = 6)
+data_clust_5 <- data.frame(data.hclust.clusters_5 = as.character(data.hclust.clusters_5))
+
+```
+
+```{R}
+# Cluster Summary
+cluster_summary_5 <- train_data_5 %>%
+  bind_cols(data_clust_5) %>%
+  group_by(data.hclust.clusters_5) %>%
+  summarise(
+    vFA = mean(vFA),
+    vCU = mean(vCU),
+    est.K. = mean(K.),
+    count = n()
+  )
+print(cluster_summary_5)
+
+```
+
+```{R}
+# Combine Clusters and Re-print the Summary
+pitcher_data_updated_5 <- train_data_5 %>%
+  bind_cols(data_clust_5) %>%
+  mutate(data.hclust.clusters_5 = case_when(
+    data.hclust.clusters_5 == "2" ~ "1",
+    data.hclust.clusters_5 == "6" ~ "3",
+    data.hclust.clusters_5 == "5" ~ "4",
+    TRUE ~ data.hclust.clusters_5
+  ))
+
+cluster_summary_updated_5 <- pitcher_data_updated_5 %>%
+  group_by(data.hclust.clusters_5) %>%
+  summarise(
+    vFA = mean(vFA),
+    vCU = mean(vCU),
+    est.K. = mean(K.),
+    count = n()
+  )
+print(cluster_summary_updated_5)
+
+```
+
+```{R}
+# Creating a new, descriptive column for each cluster and adding it to the historical data
+lookup <- tibble(
+  pitcher_index = as.character(1:4),
+  picther_stats = c("High Curveball Velocity", "", "Low Curveball Velocity", " & Average Curveball Velocity")
+)
+
+picther_data_final_5 <- pitcher_data_updated_5 %>%
+  inner_join(lookup, by = c("data.hclust.clusters_5" = "pitcher_index")) %>%
+  mutate(picther_stats = as.factor(picther_stats))
+print(picther_data_final_5)
+
+```
+
+```{R}
+ggplot(picther_data_final_5, aes(x = K., y = vFA, color = picther_stats)) + geom_point(size = 1, alpha = 0.5, position = "jitter")
+
+```
+
+# Final Model
+
+```{R}
+# Creating Training and Test data
+train_index_5 <- createDataPartition(picther_data_final_5$K., p = 0.8, list = FALSE)
+
+train_data_5 = picther_data_final_5[train_index_5, ]
+test_data_5 = picther_data_final_5[-train_index_5, ]
+
+y_train_5 = train_data_5$K.
+y_test_5 = test_data_5$K.
+
+```
+
+```{R}
+# Creating Final Model
+library(randomForest)
+random_forest_model_5 = randomForest(K. ~ MLBAMID + PlayerId + Name + Team + Age + Season + TBF + IP + vFA + vCU + picther_stats, data = picther_data_final_5)
+print(random_forest_model_5)
+
+```
+
+```{R}
+# Viewing which variables are most important
+importance(random_forest_model_5)
+
+```
+
+```{R}
+# Testing the accuracy
+predictions_5 <- predict(random_forest_model_5, test_data_5)
+
+mse_5 <- mean((predictions_5 - test_data_5$K.)^2)
+print(mse_5)
+
+```
